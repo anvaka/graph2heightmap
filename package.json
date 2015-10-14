@@ -4,7 +4,7 @@
   "description": "Converts a regular graph into height map. Highly experimental",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "browserify --noparse='three' ./demo/index.js > demo/bundle.js"
   },
   "keywords": [
     "graph",
@@ -15,5 +15,16 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/anvaka/graph2heightmap"
+  },
+  "dependencies": {
+    "yaqt": "git+https://github.com/anvaka/yaqt.git"
+  },
+  "devDependencies": {
+    "browserify": "^11.2.0",
+    "ngraph.forcelayout": "0.0.22",
+    "ngraph.generators": "0.0.16",
+    "ngraph.graph": "0.0.12",
+    "three": "^0.72.0",
+    "three.fly": "^0.1.6"
   }
 }
