@@ -1,22 +1,26 @@
-var graph = require('ngraph.generators').complete(5);
+var graph = require('ngraph.generators').wattsStrogatz(100, 20, 0.01);
 var layout = require('ngraph.forcelayout')(graph);
 
 console.log('Performing graph layout');
-for (var i = 0; i < 50; ++i) {
+for (var i = 0; i < 150; ++i) {
   layout.step();
 }
 console.log('Done. Generating height map');
-
-// This will load ngraph.tobinary saved file. just for test purpose keeping it here
-// var data = require('./laodLayout.js')();
-// var layout = data.layout;
-// var graph = data.graph;
+//
+// var fromjson = require('ngraph.fromjson');
+// var json = require('./graph.json');
+// var graph = fromjson(json)
 
 var toHeightmap = require('../');
 var mapInfo = toHeightmap(graph, getPosition);
 
 function getPosition(node) {
-  return layout.getNodePosition(node.id);
+  var pos = layout.getNodePosition(node.id);
+//  var pos = graph.getNode(node.id).data.pos;
+  return {
+    x: pos.x,//* 0.05,
+    y: pos.y//* 0.05
+  }
 }
 
 // THREE.JS stuff
@@ -61,7 +65,7 @@ function init() {
 
   for (var i = 0, j = 0, l = vertices.length; i < l; i++, j += 3) {
 
-    vertices[j + 1] = data[i] * 10;
+    vertices[j + 1] = data[i];
 
   }
 
@@ -122,42 +126,20 @@ function generateTexture(data, width, height) {
     vector3.z = data[j - width * 2] - data[j + width * 2];
     vector3.normalize();
 
-    shade = vector3.dot(sun);
+     // shade = vector3.dot(sun);
+     //
+     // imageData[i] = (96 + shade * 128) * (0.5 + data[j] * 0.007);
+     // imageData[i + 1] = (32 + shade * 96) * (0.5 + data[j] * 0.007);
+     // imageData[i + 2] = (shade * 96) * (0.5 + data[j] * 0.007);
 
-    imageData[i] = (96 + shade * 128) * (0.5 + data[j] * 0.007);
-    imageData[i + 1] = (32 + shade * 96) * (0.5 + data[j] * 0.007);
-    imageData[i + 2] = (shade * 96) * (0.5 + data[j] * 0.007);
+     var c = (data[j]/mapInfo.maxHeight * 255)|0;
+     imageData[i] = c;
+     imageData[i + 1] = c;
+     imageData[i + 2] = c;
   }
 
   context.putImageData(image, 0, 0);
-
-  // Scaled 4x
-
-  canvasScaled = document.createElement('canvas');
-  canvasScaled.width = width * 4;
-  canvasScaled.height = height * 4;
-
-  context = canvasScaled.getContext('2d');
-  context.scale(4, 4);
-  context.drawImage(canvas, 0, 0);
-
-  image = context.getImageData(0, 0, canvasScaled.width, canvasScaled.height);
-  imageData = image.data;
-
-  for (var i = 0, l = imageData.length; i < l; i += 4) {
-
-    var v = ~~(Math.random() * 5);
-
-    imageData[i] += v;
-    imageData[i + 1] += v;
-    imageData[i + 2] += v;
-
-  }
-
-  context.putImageData(image, 0, 0);
-
-  return canvasScaled;
-
+  return canvas;
 }
 
 //
