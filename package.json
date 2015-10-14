@@ -22,8 +22,10 @@
   "devDependencies": {
     "browserify": "^11.2.0",
     "ngraph.forcelayout": "0.0.22",
+    "ngraph.fromjson": "^0.1.8",
     "ngraph.generators": "0.0.16",
     "ngraph.graph": "0.0.12",
+    "ngraph.tojson": "^0.1.4",
     "three": "^0.72.0",
     "three.fly": "^0.1.6"
   }
