@@ -1,5 +1,6 @@
 (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);var f=new Error("Cannot find module '"+o+"'");throw f.code="MODULE_NOT_FOUND",f}var l=n[o]={exports:{}};t[o][0].call(l.exports,function(e){var n=t[o][1][e];return s(n?n:e)},l,l.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
 var graph = require('ngraph.generators').wattsStrogatz(100, 20, 0.01);
+var graph = require('ngraph.generators').grid(10, 10);
 var layout = require('ngraph.forcelayout')(graph);
 
 console.log('Performing graph layout');
@@ -7,10 +8,10 @@ for (var i = 0; i < 150; ++i) {
   layout.step();
 }
 console.log('Done. Generating height map');
-//
-// var fromjson = require('ngraph.fromjson');
-// var json = require('./graph.json');
-// var graph = fromjson(json)
+
+//var fromjson = require('ngraph.fromjson');
+//var json = require('./graph.json');
+//var graph = fromjson(json)
 
 var toHeightmap = require('../');
 var mapInfo = toHeightmap(graph, getPosition);
@@ -127,16 +128,12 @@ function generateTexture(data, width, height) {
     vector3.z = data[j - width * 2] - data[j + width * 2];
     vector3.normalize();
 
-     // shade = vector3.dot(sun);
-     //
-     // imageData[i] = (96 + shade * 128) * (0.5 + data[j] * 0.007);
-     // imageData[i + 1] = (32 + shade * 96) * (0.5 + data[j] * 0.007);
-     // imageData[i + 2] = (shade * 96) * (0.5 + data[j] * 0.007);
+     shade = vector3.dot(sun);
 
-     var c = (data[j]/mapInfo.maxHeight * 255)|0;
-     imageData[i] = c;
-     imageData[i + 1] = c;
-     imageData[i + 2] = c;
+     var c = 255*data[j]/mapInfo.maxHeight;
+     imageData[i] = (96 + shade * 128) * (0.5 + c * 0.007);
+     imageData[i + 1] = (32 + shade * 96) * (0.5 + c * 0.007);
+     imageData[i + 2] = (shade * 96) * (0.5 + c * 0.007);
   }
 
   context.putImageData(image, 0, 0);
@@ -158,29 +155,22 @@ function render() {
 }
 
 },{"../":2,"ngraph.forcelayout":3,"ngraph.generators":20,"three":27,"three.fly":24}],2:[function(require,module,exports){
-var createTree = require('yaqt');
 module.exports = toHeightmap;
 
 function toHeightmap(graph, getNodePosition) {
-  var positions = [];
-  var indexToNodeHeight = [];
   var maxHeight = 1024;
   var aboveWater = 3;
   var minHeight = 1;
-  var maxDegree = 0;
-  graph.forEachNode(savePosition);
-  graph.forEachNode(saveHeight);
 
-  var tree = createTree();
-  tree.init(positions);
-  var bounds = tree.bounds();
+  var bounds = getBounds();
+
   var offsetX = bounds.x - bounds.half;
   var offsetY = bounds.y - bounds.half;
 
   var squareSize = upperPowerOfTwo((bounds.half + 1) * 2);
   console.log('heightmap side length: ' + squareSize);
 
-  var maxHillRadius = squareSize * 0.01;
+  var maxHillRadius = squareSize * 0.01; /// graph.getNodesCount();
   var maxHillRadiusSquared = maxHillRadius * maxHillRadius;
 
   var size = squareSize * squareSize;
@@ -190,20 +180,38 @@ function toHeightmap(graph, getNodePosition) {
   return {
     size: squareSize,
     map: heightMap,
-    maxHeight: maxHeight
+    maxHeight: maxHeight,
+    waterLevel: aboveWater
   };
 
-  function saveHeight(node) {
-    var degree = getDegree(node.id);
-    indexToNodeHeight.push(degreeHeight(degree));
-  }
+  function getBounds() {
+    var minX = 0;
+    var maxX = 0;
+    var minY = 0;
+    var maxY = 0;
+    var maxDegree = 0;
 
-  function savePosition(node) {
-    var pos = getNodePosition(node);
-    positions.push(pos.x, pos.y);
-    var degree = getDegree(node.id);
+    graph.forEachNode(computeMetadata);
 
-    if (degree > maxDegree) maxDegree = degree;
+    var half = (Math.max((maxX - minX), (maxY - minY)))/2;
+
+    return {
+      maxDegree: maxDegree,
+      x: (minX + maxX)/2,
+      y: (minY + maxY)/2,
+      half: half
+    };
+
+    function computeMetadata(node) {
+      var pos = getNodePosition(node);
+      var degree = getDegree(node.id);
+
+      if (pos.x < minX) minX = pos.x;
+      if (pos.y < minY) minY = pos.y;
+      if (pos.x > minX) maxX = pos.x;
+      if (pos.y > minY) maxY = pos.y;
+      if (degree > maxDegree) maxDegree = degree;
+    }
   }
 
   function fillInMap() {
@@ -213,14 +221,31 @@ function toHeightmap(graph, getNodePosition) {
       if (!isSet(i, 0)) set(i, 0, minHeight);
       if (!isSet(0, i)) set(0, i, minHeight);
     }
-    for (var i = 0; i < squareSize; ++i) {
-      for (var j = 0; j < squareSize; ++j) {
-        if (isSet(i, j)) {
-          // skip
-          continue;
-        }
-        var height = getInterpolatedHeight(i, j);
-        set(i, j, height);
+    // On second iteration we surround each node with height additonal data
+    graph.forEachNode(surroundMountain);
+  }
+
+  function surroundMountain(node) {
+    var pos = getNodePosition(node);
+    // convert to heightmap coordinates:
+    var x = Math.round(pos.x - offsetX);
+    var y = Math.round(pos.y - offsetY);
+    var degree = getDegree(node.id);
+    var height = degreeHeight(degree);
+    var size = Math.ceil(maxHillRadius) + 1;
+    var fromX = x - size;
+    var toX = x + size;
+    var fromY = y - size;
+    var toY = y + size;
+
+    for (var i = fromX; i < toX; ++i) {
+      if (i <= 0 || i >= squareSize) continue; // out of bounds
+      for (var j = fromY; j < toY; ++j) {
+        if (j <= 0 || j >= squareSize) continue;
+        if (i === x && j === y) continue;
+        if (isSet(i, j)) continue;
+        var iHeight = getInterpolatedHeight(i, j, x, y, height);
+        set(i, j, iHeight);
       }
     }
   }
@@ -229,48 +254,17 @@ function toHeightmap(graph, getNodePosition) {
     return heightMap[x + y * squareSize] > 0;
   }
 
-  function getInterpolatedHeight(canvasX, canvasY) {
-    // need to transform to graph coordinates for proximity search:
-    var x = canvasX + offsetX;
-    var y = canvasY + offsetY;
-    var nearestPoints = getNearestPoints(x, y);
-    nearestPoints.sort(byDistance);
-    if (nearestPoints.length === 0) return minHeight;
-
-    var count = Math.min(1, nearestPoints.length);
-    var avg = 0;
-    for (var i = 0; i < count; ++i) {
-      var ptIndex = nearestPoints[i];
-      avg += getSlopeToNearest(x, y, ptIndex);
-    }
-    return avg/count;
-
-    function byDistance(i, j) {
-      var x1 = positions[i], y1 = positions[i + 1],
-        x2 = positions[j], y2 = positions[j + 1];
-      return getDistance(x, y, i) - getDistance(x, y, j);
-    }
-  }
-
-
-  function getSlopeToNearest(x, y, index) {
-    var dist = getDistance(x, y, index);
-    if (dist > maxHillRadiusSquared) dist = maxHillRadiusSquared;
-    var change = dist/maxHillRadiusSquared;
+  function getInterpolatedHeight(x, y, cx, cy, nearestNodeHeight) {
+    var dist = getDistance(x, y, cx, cy);
+    if (dist > maxHillRadiusSquared) return 0;
+    var change = dist / maxHillRadiusSquared;
     var x = (1 - change) * 4.4;
-    var height = (Math.sin(x - Math.PI * 1.42)/(x - Math.PI * 1.42) +0.22)/1.22;
-    var nearestNodeHeight = indexToNodeHeight[index/2];
-    return (height * nearestNodeHeight)|0;
+    var height = (Math.sin(x - Math.PI * 1.42) / (x - Math.PI * 1.42) + 0.22) / 1.22;
+    return (height * nearestNodeHeight) | 0;
   }
 
-  function getDistance(x, y, index) {
-    var x1 = positions[index];
-    var y1 = positions[index + 1];
+  function getDistance(x, y, x1, y1) {
     return (x1 - x) * (x1 - x) + (y1 - y) * (y1 - y);
-  }
-
-  function getNearestPoints(x, y) {
-    return tree.pointsAround(x, y, maxHillRadius);
   }
 
   function setPositionOnHeightMap(node) {
@@ -287,8 +281,12 @@ function toHeightmap(graph, getNodePosition) {
     heightMap[x + squareSize * y] = height;
   }
 
+  function get(x, y) {
+    return heightMap[x + squareSize * y];
+  }
+
   function degreeHeight(degree) {
-    var height = (maxHeight - aboveWater) * degree / maxDegree + aboveWater;
+    var height = (maxHeight - aboveWater) * degree / bounds.maxDegree + aboveWater;
     return height | 0;
   }
 
@@ -317,7 +315,7 @@ function upperPowerOfTwo(v) {
   return v;
 }
 
-},{"yaqt":28}],3:[function(require,module,exports){
+},{}],3:[function(require,module,exports){
 module.exports = createLayout;
 module.exports.simulator = require('ngraph.physics.simulator');
 
@@ -39048,223 +39046,4 @@ if (typeof exports !== 'undefined') {
   this['THREE'] = THREE;
 }
 
-},{}],28:[function(require,module,exports){
-var Bounds = require('./lib/bounds.js');
-var TreeNode = require('./lib/treeNode.js');
-var EmptyRegion = new Bounds();
-var rectangularCheck = require('./lib/rectangularCheck.js');
-
-module.exports = createTree;
-
-function createTree(options) {
-  options = options || {};
-
-  var queryBounds = new Bounds();
-  var root;
-  var originalArray;
-  var api = {
-    init: init,
-    bounds: getBounds,
-    pointsAround: getPointsAround
-  };
-
-  return api;
-
-  function getPointsAround(x, y, half, intersectCheck) {
-    if (typeof intersectCheck !== 'function') {
-      intersectCheck = rectangularCheck;
-    }
-    var indices = [];
-    queryBounds.x = x;
-    queryBounds.y = y;
-    queryBounds.half = half;
-    root.query(queryBounds, indices, originalArray, intersectCheck);
-    return indices;
-  }
-
-  function init(points) {
-    if (!points) throw new Error('Points array is required for quadtree to work');
-    if (typeof points.length !== 'number') throw new Error('Points should be array-like object');
-    if (points.length % 2 !== 0) throw new Error('Points array should consist of series of x,y coordinates and be multiple of 2');
-    originalArray = points;
-    root = createRootNode(points);
-    for (var i = 0; i < points.length; i += 2) {
-      root.insert(i, originalArray);
-    }
-  }
-
-  function getBounds() {
-    if (!root) return EmptyRegion;
-    return root.bounds;
-  }
-
-  function createRootNode(points) {
-    // Edge case deserves empty region:
-    if (points.length === 0) {
-      var empty = new Bounds();
-      return new TreeNode(empty);
-    }
-
-    // Otherwise let's figure out how big should be the root region
-    var minX = Number.POSITIVE_INFINITY;
-    var minY = Number.POSITIVE_INFINITY;
-    var maxX = Number.NEGATIVE_INFINITY;
-    var maxY = Number.NEGATIVE_INFINITY;
-    for (var i = 0; i < points.length; i += 2) {
-      var x = points[i], y = points[i + 1];
-      if (x < minX) minX = x;
-      if (x > maxX) maxX = x;
-      if (y < minY) minY = y;
-      if (y > maxY) maxY = y;
-    }
-
-    // Make bounds square:
-    var side = Math.max(maxX - minX, maxY - minY);
-    // since we need to have both sides inside the area, let's artificially
-    // grow the root region:
-    side += 2;
-    minX -= 1;
-    minY -= 1;
-    var half = side/2;
-
-    var bounds = new Bounds(minX + half, minY + half, half);
-    return new TreeNode(bounds);
-  }
-}
-
-},{"./lib/bounds.js":29,"./lib/rectangularCheck.js":30,"./lib/treeNode.js":31}],29:[function(require,module,exports){
-module.exports = Bounds;
-
-function Bounds(x, y, half) {
-  this.x = typeof x === 'number' ? x : 0;
-  this.y = typeof y === 'number' ? y : 0;
-  this.half = typeof half === 'number' ? half : 0;
-}
-
-Bounds.prototype.left = function left() {
-  return this.x - this.half;
-};
-
-Bounds.prototype.top = function top() {
-  return this.y - this.half;
-};
-
-Bounds.prototype.width = function width() {
-  return this.half * 2;
-};
-
-Bounds.prototype.height = function height() {
-  return this.half * 2;
-};
-
-Bounds.prototype.centerX = function cx() {
-  return this.x;
-};
-
-Bounds.prototype.centerY = function cy() {
-  return this.y;
-};
-
-Bounds.prototype.contains = function contains(x, y) {
-  var half = this.half;
-  return this.x - half <= x && x < this.x + half &&
-         this.y - half <= y && y < this.y + half;
-};
-
-},{}],30:[function(require,module,exports){
-module.exports = intersects;
-
-function intersects(a, b) {
-  // http://stackoverflow.com/questions/306316/determine-if-two-rectangles-overlap-each-other
-  return a.x - a.half < b.x + b.half &&
-    a.x + a.half > b.x - b.half &&
-    a.y - a.half < b.y + b.half &&
-    a.y + a.half > b.y - b.half;
-}
-
-},{}],31:[function(require,module,exports){
-var Bounds = require('./bounds.js');
-var MAX_ITEMS = 4;
-module.exports = TreeNode;
-
-function TreeNode(bounds) {
-  this.bounds = bounds;
-  this.nw = null;
-  this.ne = null;
-  this.sw = null;
-  this.se = null;
-  this.items = null;
-}
-
-TreeNode.prototype.subdivide = function subdivide() {
-  var bounds = this.bounds;
-  var quarter = bounds.half/2;
-
-  this.nw = new TreeNode(new Bounds(bounds.x - quarter, bounds.y - quarter, quarter));
-  this.ne = new TreeNode(new Bounds(bounds.x + quarter, bounds.y - quarter, quarter));
-  this.sw = new TreeNode(new Bounds(bounds.x - quarter, bounds.y + quarter, quarter));
-  this.se = new TreeNode(new Bounds(bounds.x + quarter, bounds.y + quarter, quarter));
-};
-
-TreeNode.prototype.insert = function insert(idx, array) {
-  var isLeaf = this.nw === null;
-  if (isLeaf) {
-    // todo: this memory could be recycled to avoid gc
-    if (this.items === null) {
-      this.items = [idx];
-    } else {
-      this.items.push(idx);
-    }
-    if (this.items.length >= MAX_ITEMS) {
-      this.subdivide();
-      for (var i = 0; i < this.items.length; ++i) {
-        this.insert(this.items[i], array);
-      }
-      this.items = null;
-    }
-  } else {
-    var x = array[idx], y = array[idx + 1];
-    var bounds = this.bounds;
-    var quadIdx = 0; // assume NW
-    if (x > bounds.x) {
-      quadIdx += 1; // nope, we are in E part
-    }
-    if (y > bounds.y) {
-      quadIdx += 2; // Somewhere south.
-    }
-
-    var child = getChild(this, quadIdx);
-    child.insert(idx, array);
-  }
-};
-
-TreeNode.prototype.query = function queryBounds(bounds, results, sourceArray, intersects) {
-  if (!intersects(this.bounds, bounds)) return;
-  var items = this.items;
-  if (items) {
-    for (var i = 0; i < items.length; ++i) {
-      var idx = items[i];
-      var x = sourceArray[idx];
-      var y = sourceArray[idx + 1];
-      if (bounds.contains(x, y)) {
-        results.push(idx);
-      }
-    }
-  }
-
-  if (!this.nw) return;
-
-  this.nw.query(bounds, results, sourceArray, intersects);
-  this.ne.query(bounds, results, sourceArray, intersects);
-  this.sw.query(bounds, results, sourceArray, intersects);
-  this.se.query(bounds, results, sourceArray, intersects);
-};
-
-function getChild(node, idx) {
-  if (idx === 0) return node.nw;
-  if (idx === 1) return node.ne;
-  if (idx === 2) return node.sw;
-  if (idx === 3) return node.se;
-}
-
-},{"./bounds.js":29}]},{},[1]);
+},{}]},{},[1]);

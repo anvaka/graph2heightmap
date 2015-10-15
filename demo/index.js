@@ -1,4 +1,5 @@
 var graph = require('ngraph.generators').wattsStrogatz(100, 20, 0.01);
+var graph = require('ngraph.generators').grid(10, 10);
 var layout = require('ngraph.forcelayout')(graph);
 
 console.log('Performing graph layout');
@@ -6,10 +7,10 @@ for (var i = 0; i < 150; ++i) {
   layout.step();
 }
 console.log('Done. Generating height map');
-//
-// var fromjson = require('ngraph.fromjson');
-// var json = require('./graph.json');
-// var graph = fromjson(json)
+
+//var fromjson = require('ngraph.fromjson');
+//var json = require('./graph.json');
+//var graph = fromjson(json)
 
 var toHeightmap = require('../');
 var mapInfo = toHeightmap(graph, getPosition);
@@ -126,16 +127,12 @@ function generateTexture(data, width, height) {
     vector3.z = data[j - width * 2] - data[j + width * 2];
     vector3.normalize();
 
-     // shade = vector3.dot(sun);
-     //
-     // imageData[i] = (96 + shade * 128) * (0.5 + data[j] * 0.007);
-     // imageData[i + 1] = (32 + shade * 96) * (0.5 + data[j] * 0.007);
-     // imageData[i + 2] = (shade * 96) * (0.5 + data[j] * 0.007);
+     shade = vector3.dot(sun);
 
-     var c = (data[j]/mapInfo.maxHeight * 255)|0;
-     imageData[i] = c;
-     imageData[i + 1] = c;
-     imageData[i + 2] = c;
+     var c = 255*data[j]/mapInfo.maxHeight;
+     imageData[i] = (96 + shade * 128) * (0.5 + c * 0.007);
+     imageData[i + 1] = (32 + shade * 96) * (0.5 + c * 0.007);
+     imageData[i + 2] = (shade * 96) * (0.5 + c * 0.007);
   }
 
   context.putImageData(image, 0, 0);

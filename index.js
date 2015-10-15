@@ -1,26 +1,19 @@
-var createTree = require('yaqt');
 module.exports = toHeightmap;
 
 function toHeightmap(graph, getNodePosition) {
-  var positions = [];
-  var indexToNodeHeight = [];
   var maxHeight = 1024;
   var aboveWater = 3;
   var minHeight = 1;
-  var maxDegree = 0;
-  graph.forEachNode(savePosition);
-  graph.forEachNode(saveHeight);
 
-  var tree = createTree();
-  tree.init(positions);
-  var bounds = tree.bounds();
+  var bounds = getBounds();
+
   var offsetX = bounds.x - bounds.half;
   var offsetY = bounds.y - bounds.half;
 
   var squareSize = upperPowerOfTwo((bounds.half + 1) * 2);
   console.log('heightmap side length: ' + squareSize);
 
-  var maxHillRadius = squareSize * 0.01;
+  var maxHillRadius = squareSize * 0.01; /// graph.getNodesCount();
   var maxHillRadiusSquared = maxHillRadius * maxHillRadius;
 
   var size = squareSize * squareSize;
@@ -30,20 +23,38 @@ function toHeightmap(graph, getNodePosition) {
   return {
     size: squareSize,
     map: heightMap,
-    maxHeight: maxHeight
+    maxHeight: maxHeight,
+    waterLevel: aboveWater
   };
 
-  function saveHeight(node) {
-    var degree = getDegree(node.id);
-    indexToNodeHeight.push(degreeHeight(degree));
-  }
+  function getBounds() {
+    var minX = 0;
+    var maxX = 0;
+    var minY = 0;
+    var maxY = 0;
+    var maxDegree = 0;
 
-  function savePosition(node) {
-    var pos = getNodePosition(node);
-    positions.push(pos.x, pos.y);
-    var degree = getDegree(node.id);
+    graph.forEachNode(computeMetadata);
 
-    if (degree > maxDegree) maxDegree = degree;
+    var half = (Math.max((maxX - minX), (maxY - minY)))/2;
+
+    return {
+      maxDegree: maxDegree,
+      x: (minX + maxX)/2,
+      y: (minY + maxY)/2,
+      half: half
+    };
+
+    function computeMetadata(node) {
+      var pos = getNodePosition(node);
+      var degree = getDegree(node.id);
+
+      if (pos.x < minX) minX = pos.x;
+      if (pos.y < minY) minY = pos.y;
+      if (pos.x > minX) maxX = pos.x;
+      if (pos.y > minY) maxY = pos.y;
+      if (degree > maxDegree) maxDegree = degree;
+    }
   }
 
   function fillInMap() {
@@ -53,14 +64,31 @@ function toHeightmap(graph, getNodePosition) {
       if (!isSet(i, 0)) set(i, 0, minHeight);
       if (!isSet(0, i)) set(0, i, minHeight);
     }
-    for (var i = 0; i < squareSize; ++i) {
-      for (var j = 0; j < squareSize; ++j) {
-        if (isSet(i, j)) {
-          // skip
-          continue;
-        }
-        var height = getInterpolatedHeight(i, j);
-        set(i, j, height);
+    // On second iteration we surround each node with height additonal data
+    graph.forEachNode(surroundMountain);
+  }
+
+  function surroundMountain(node) {
+    var pos = getNodePosition(node);
+    // convert to heightmap coordinates:
+    var x = Math.round(pos.x - offsetX);
+    var y = Math.round(pos.y - offsetY);
+    var degree = getDegree(node.id);
+    var height = degreeHeight(degree);
+    var size = Math.ceil(maxHillRadius) + 1;
+    var fromX = x - size;
+    var toX = x + size;
+    var fromY = y - size;
+    var toY = y + size;
+
+    for (var i = fromX; i < toX; ++i) {
+      if (i <= 0 || i >= squareSize) continue; // out of bounds
+      for (var j = fromY; j < toY; ++j) {
+        if (j <= 0 || j >= squareSize) continue;
+        if (i === x && j === y) continue;
+        if (isSet(i, j)) continue;
+        var iHeight = getInterpolatedHeight(i, j, x, y, height);
+        set(i, j, iHeight);
       }
     }
   }
@@ -69,48 +97,17 @@ function toHeightmap(graph, getNodePosition) {
     return heightMap[x + y * squareSize] > 0;
   }
 
-  function getInterpolatedHeight(canvasX, canvasY) {
-    // need to transform to graph coordinates for proximity search:
-    var x = canvasX + offsetX;
-    var y = canvasY + offsetY;
-    var nearestPoints = getNearestPoints(x, y);
-    nearestPoints.sort(byDistance);
-    if (nearestPoints.length === 0) return minHeight;
-
-    var count = Math.min(1, nearestPoints.length);
-    var avg = 0;
-    for (var i = 0; i < count; ++i) {
-      var ptIndex = nearestPoints[i];
-      avg += getSlopeToNearest(x, y, ptIndex);
-    }
-    return avg/count;
-
-    function byDistance(i, j) {
-      var x1 = positions[i], y1 = positions[i + 1],
-        x2 = positions[j], y2 = positions[j + 1];
-      return getDistance(x, y, i) - getDistance(x, y, j);
-    }
-  }
-
-
-  function getSlopeToNearest(x, y, index) {
-    var dist = getDistance(x, y, index);
-    if (dist > maxHillRadiusSquared) dist = maxHillRadiusSquared;
-    var change = dist/maxHillRadiusSquared;
+  function getInterpolatedHeight(x, y, cx, cy, nearestNodeHeight) {
+    var dist = getDistance(x, y, cx, cy);
+    if (dist > maxHillRadiusSquared) return 0;
+    var change = dist / maxHillRadiusSquared;
     var x = (1 - change) * 4.4;
-    var height = (Math.sin(x - Math.PI * 1.42)/(x - Math.PI * 1.42) +0.22)/1.22;
-    var nearestNodeHeight = indexToNodeHeight[index/2];
-    return (height * nearestNodeHeight)|0;
+    var height = (Math.sin(x - Math.PI * 1.42) / (x - Math.PI * 1.42) + 0.22) / 1.22;
+    return (height * nearestNodeHeight) | 0;
   }
 
-  function getDistance(x, y, index) {
-    var x1 = positions[index];
-    var y1 = positions[index + 1];
+  function getDistance(x, y, x1, y1) {
     return (x1 - x) * (x1 - x) + (y1 - y) * (y1 - y);
-  }
-
-  function getNearestPoints(x, y) {
-    return tree.pointsAround(x, y, maxHillRadius);
   }
 
   function setPositionOnHeightMap(node) {
@@ -127,8 +124,12 @@ function toHeightmap(graph, getNodePosition) {
     heightMap[x + squareSize * y] = height;
   }
 
+  function get(x, y) {
+    return heightMap[x + squareSize * y];
+  }
+
   function degreeHeight(degree) {
-    var height = (maxHeight - aboveWater) * degree / maxDegree + aboveWater;
+    var height = (maxHeight - aboveWater) * degree / bounds.maxDegree + aboveWater;
     return height | 0;
   }
 
