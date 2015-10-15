@@ -129,7 +129,8 @@ function toHeightmap(graph, getNodePosition) {
   }
 
   function degreeHeight(degree) {
-    var height = (maxHeight - aboveWater) * degree / bounds.maxDegree + aboveWater;
+    var height = (maxHeight - aboveWater) * degree / bounds.maxDegree +
+      aboveWater;
     return height | 0;
   }
 

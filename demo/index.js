@@ -1,4 +1,4 @@
-var graph = require('ngraph.generators').wattsStrogatz(100, 20, 0.01);
+//var graph = require('ngraph.generators').wattsStrogatz(100, 20, 0.01);
 var graph = require('ngraph.generators').grid(10, 10);
 var layout = require('ngraph.forcelayout')(graph);
 
@@ -17,11 +17,11 @@ var mapInfo = toHeightmap(graph, getPosition);
 
 function getPosition(node) {
   var pos = layout.getNodePosition(node.id);
-//  var pos = graph.getNode(node.id).data.pos;
+ // var pos = graph.getNode(node.id).data.pos;
   return {
-    x: pos.x,//* 0.05,
-    y: pos.y//* 0.05
-  }
+    x: pos.x,
+    y: pos.y
+  };
 }
 
 // THREE.JS stuff
@@ -31,12 +31,8 @@ var container, stats;
 
 var camera, controls, scene, renderer;
 
-var mesh, texture;
-
-var worldWidth = mapInfo.size,
-  worldDepth = mapInfo.size,
-  worldHalfWidth = worldWidth / 2,
-  worldHalfDepth = worldDepth / 2;
+var createLoader = require('./chunkLoader.js');
+var chunks = createLoader(mapInfo, 256);
 
 var clock = new THREE.Clock();
 
@@ -55,29 +51,7 @@ function init() {
   controls.movementSpeed = 1000;
   controls.rollSpeed = 0.5;
 
-  data = mapInfo.map;
-
-  camera.position.y = data[worldHalfWidth + worldHalfDepth * worldWidth] * 10 + 500;
-
-  var geometry = new THREE.PlaneBufferGeometry(7500, 7500, worldWidth - 1, worldDepth - 1);
-  geometry.rotateX(-Math.PI / 2);
-
-  var vertices = geometry.attributes.position.array;
-
-  for (var i = 0, j = 0, l = vertices.length; i < l; i++, j += 3) {
-
-    vertices[j + 1] = data[i];
-
-  }
-
-  texture = new THREE.CanvasTexture(generateTexture(data, worldWidth, worldDepth));
-  texture.wrapS = THREE.ClampToEdgeWrapping;
-  texture.wrapT = THREE.ClampToEdgeWrapping;
-
-  mesh = new THREE.Mesh(geometry, new THREE.MeshBasicMaterial({
-    map: texture
-  }));
-  scene.add(mesh);
+  camera.position.y = 500;
 
   renderer = new THREE.WebGLRenderer();
   renderer.setClearColor(0xbfd1e5);
@@ -87,6 +61,14 @@ function init() {
   container.innerHTML = "";
 
   container.appendChild(renderer.domElement);
+
+  var size = chunks.totalChunks;
+  for (var i = 0; i < size; ++i) {
+    for (var j = 0; j < size; ++j) {
+      var mesh = chunks.load(i, j);
+      scene.add(mesh);
+    }
+  }
 
   window.addEventListener('resize', onWindowResize, false);
 }
@@ -99,45 +81,6 @@ function onWindowResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-function generateTexture(data, width, height) {
-
-  var canvas, canvasScaled, context, image, imageData,
-    level, diff, vector3, sun, shade;
-
-  vector3 = new THREE.Vector3(0, 0, 0);
-
-  sun = new THREE.Vector3(1, 1, 1);
-  sun.normalize();
-
-  canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-
-  context = canvas.getContext('2d');
-  context.fillStyle = '#000';
-  context.fillRect(0, 0, width, height);
-
-  image = context.getImageData(0, 0, canvas.width, canvas.height);
-  imageData = image.data;
-
-  for (var i = 0, j = 0, l = imageData.length; i < l; i += 4, j++) {
-
-    vector3.x = data[j - 2] - data[j + 2];
-    vector3.y = 2;
-    vector3.z = data[j - width * 2] - data[j + width * 2];
-    vector3.normalize();
-
-     shade = vector3.dot(sun);
-
-     var c = 255*data[j]/mapInfo.maxHeight;
-     imageData[i] = (96 + shade * 128) * (0.5 + c * 0.007);
-     imageData[i + 1] = (32 + shade * 96) * (0.5 + c * 0.007);
-     imageData[i + 2] = (shade * 96) * (0.5 + c * 0.007);
-  }
-
-  context.putImageData(image, 0, 0);
-  return canvas;
-}
 
 //
 
