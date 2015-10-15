@@ -40,8 +40,8 @@ function toHeightmap(graph, getNodePosition) {
 
     return {
       maxDegree: maxDegree,
-      x: (minX + maxX)/2,
-      y: (minY + maxY)/2,
+      x: (minX + half),
+      y: (minY + half),
       half: half
     };
 
